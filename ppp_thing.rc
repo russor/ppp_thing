@@ -1,0 +1,16 @@
+#!/bin/sh
+#
+# PROVIDE: ppp_thing
+# REQUIRE: networking
+
+. /etc/rc.subr
+
+name=ppp_thing
+rcvar=ppp_thing_enable
+
+command="/usr/local/bin/ppp_thing"
+
+load_rc_config ppp_thing
+: ${ppp_thing_enable:="NO"}
+
+run_rc_command "$1"
