@@ -1,0 +1,6 @@
+*~
+.depend*
+ppp_thing
+ppp_thing.debug
+ppp_thing.o
+ppp_thing.full
