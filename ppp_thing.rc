@@ -1,7 +1,8 @@
 #!/bin/sh
 #
 # PROVIDE: ppp_thing
-# REQUIRE: networking
+# REQUIRE: netif
+# BEFORE: NETWORK NETWORKING
 
 . /etc/rc.subr
 
