@@ -12,13 +12,16 @@ restarts faster than the Access Concentrator times out the session.
 
 ## Installation
 
-```make
-make install ```
+```
+make
+make install
+```
 
 add a config in ```/usr/local/etc/ppp_thing.conf```; this is a simple line
 oriented config file that looks like:
 
-```Interface where PPPoE runs
+```
+Interface where PPPoE runs
 xx:xx:xx:xx:xx:xx <- mac address to use
 username
 password
@@ -64,7 +67,7 @@ Or if you found a crash, or using unitialized memory etc, please report (or
 patch).
 
 If you really want a good PPPoE client,
-[https://sourceforge.net/projects/mpd/] (mpd) looks like a good choice; but
+[https://sourceforge.net/projects/mpd/](mpd) looks like a good choice; but
 it doesn't have a way (that I could see) to share a session between two
 peers.
 
