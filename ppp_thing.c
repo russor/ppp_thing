@@ -652,11 +652,13 @@ void delete_default_route() {
     rt_msg->rtm_flags =  RTF_UP | RTF_GATEWAY | RTF_STATIC;
     int i = sizeof(*rt_msg);
     struct sockaddr_in *sockaddr = (struct sockaddr_in *)&buf[i];
+    bzero(sockaddr, sizeof(*sockaddr));
     sockaddr->sin_len = sizeof(*sockaddr);
     sockaddr->sin_family = AF_INET;
     sockaddr->sin_addr.s_addr = 0;
     i += sizeof(*sockaddr);
     sockaddr = (struct sockaddr_in*) &buf[i];
+    bzero(sockaddr, sizeof(*sockaddr));
     sockaddr->sin_len = sizeof(*sockaddr);
     sockaddr->sin_family = AF_INET;
     sockaddr->sin_addr.s_addr = 0;
