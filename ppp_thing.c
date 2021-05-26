@@ -344,32 +344,35 @@ int main () {
         if (FD_ISSET(routes, &set)) {
             if ((len = recv(routes, buf, sizeof(buf), 0)) > 0) {
                 size_t i = 0;
+                struct ifa_msghdr * ifa_msg;
                 while (i < len) {
-                    rt_msg = (struct rt_msghdr*)&buf[i];
-                    if (i + rt_msg->rtm_msglen > len) {
+                    ifa_msg = (struct ifa_msghdr*)&buf[i];
+                    if (i + ifa_msg->ifam_msglen > len) {
                         syslog(LOG_ERR, "routing message past length of buffer: i: %ld, len: %ld, msg_len: %d",
-                            i, len, rt_msg->rtm_msglen);
+                            i, len, ifa_msg->ifam_msglen);
                         exit(1);
                     }
-                    if (rt_msg->rtm_type == RTM_ADD || rt_msg->rtm_type == RTM_DELETE) {
-                        if (rt_msg->rtm_addrs == (RTA_DST | RTA_GATEWAY | RTA_NETMASK)) {
-                            if (rt_msg->rtm_msglen >= sizeof(*rt_msg) + sizeof(struct sockaddr_in)) {
-                                struct sockaddr_in *dest, *gateway, *netmask;
-                                dest = (struct sockaddr_in*)&buf[i+sizeof(*rt_msg)];
-                                assert (i+sizeof(*rt_msg) + dest->sin_len + sizeof(struct sockaddr_in) <= rt_msg->rtm_msglen);
-                                gateway = (struct sockaddr_in*)&buf[i+sizeof(*rt_msg) + dest->sin_len];
-                                assert (i+sizeof(*rt_msg) + dest->sin_len + gateway->sin_len + sizeof(struct sockaddr_in) <= rt_msg->rtm_msglen);
-                                netmask = (struct sockaddr_in*)&buf[i+sizeof(*rt_msg) + dest->sin_len + gateway->sin_len];
-                                assert (i+sizeof(*rt_msg) + dest->sin_len + gateway->sin_len + netmask->sin_len <= rt_msg->rtm_msglen);
-                                
+                    if (ifa_msg->ifam_type == RTM_NEWADDR || ifa_msg->ifam_type == RTM_DELADDR) {
+                        if (ifa_msg->ifam_addrs == (RTA_NETMASK | RTA_IFP | RTA_IFA | RTA_BRD)) {
+                            if (ifa_msg->ifam_msglen >= sizeof(*ifa_msg) + sizeof(struct sockaddr_in)) {
+                                struct sockaddr_in *netmask, *ifp, *ifa, *brd;
+                                netmask = (struct sockaddr_in*)&buf[i+sizeof(*ifa_msg)];
+                                assert (i+sizeof(*ifa_msg) + netmask->sin_len + sizeof(struct sockaddr_in) <= ifa_msg->ifam_msglen);
+                                ifp = (struct sockaddr_in*)&buf[i+sizeof(*ifa_msg) + netmask->sin_len];
+                                assert (i+sizeof(*ifa_msg) + netmask->sin_len + ifp->sin_len + sizeof(struct sockaddr_in) <= ifa_msg->ifam_msglen);
+                                ifa = (struct sockaddr_in*)&buf[i+sizeof(*ifa_msg) + netmask->sin_len + ifp->sin_len];
+                                assert (i+sizeof(*ifa_msg) + netmask->sin_len + ifp->sin_len + ifa->sin_len + sizeof (struct sockaddr_in)<= ifa_msg->ifam_msglen);
+                                brd = (struct sockaddr_in*)&buf[i+sizeof(*ifa_msg) + netmask->sin_len + ifp->sin_len + ifa->sin_len];
+                                assert (i+sizeof(*ifa_msg) + netmask->sin_len + ifp->sin_len + ifa->sin_len + brd->sin_len <= ifa_msg->ifam_msglen);
+
                                 if (netmask->sin_addr.s_addr == ntohl(INADDR_BROADCAST) && 
-                                    dest->sin_addr.s_addr == CARP_ADDR.s_addr) {
+                                    ifa->sin_addr.s_addr == CARP_ADDR.s_addr && brd->sin_addr.s_addr == CARP_ADDR.s_addr) {
                                     
-                                    if (rt_msg->rtm_type == RTM_ADD && !I_AM_CARP_MASTER) {
+                                    if (ifa_msg->ifam_type == RTM_NEWADDR && !I_AM_CARP_MASTER) {
                                         syslog(LOG_NOTICE, "I am CARP master");
                                         I_AM_CARP_MASTER = 1;
                                         new_state(PPP_CARP_MASTER);
-                                    } else if (rt_msg->rtm_type == RTM_DELETE && I_AM_CARP_MASTER) {
+                                    } else if (ifa_msg->ifam_type == RTM_DELADDR && I_AM_CARP_MASTER) {
                                         syslog(LOG_NOTICE, "I am not CARP master");
                                         I_AM_CARP_MASTER = 0;
                                         if (ppp_state != PPP_ZOMBIE && ppp_state != PPP_UP) {
@@ -377,15 +380,16 @@ int main () {
                                         }
                                         new_state(PPP_CLOSED);
                                     }
-                                } else {
-                                    char dest_ip[INET_ADDRSTRLEN], mask_ip[INET_ADDRSTRLEN];
-                                    inet_ntoa_r(dest->sin_addr, dest_ip, sizeof(dest_ip));
+/*                                } else {
+                                    char ifa_ip[INET_ADDRSTRLEN], mask_ip[INET_ADDRSTRLEN];
+                                    inet_ntoa_r(ifa->sin_addr, ifa_ip, sizeof(ifa_ip));
                                     inet_ntoa_r(netmask->sin_addr, mask_ip, sizeof(mask_ip));
+                                    syslog(LOG_NOTICE, "ignored rtm %x ifa %s mask %s", ifa_msg->ifam_type, ifa_ip, mask_ip);*/
                                 }
                             }
-                        } 
+                        }
                     }
-                    i += rt_msg->rtm_msglen;
+                    i += ifa_msg->ifam_msglen;
                 }
             } else {
                 syslog(LOG_ERR, "bad routes data");
@@ -679,7 +683,7 @@ void set_default_route(struct in_addr *gateway) {
     u_char buf[MAX_BUF];
     struct rt_msghdr *rt_msg = (struct rt_msghdr*) buf;
     bzero(rt_msg, sizeof(*rt_msg));
-    rt_msg->rtm_type = RTM_ADD;
+    rt_msg->rtm_type = RTM_CHANGE;
     rt_msg->rtm_version = RTM_VERSION;
     rt_msg->rtm_addrs = (RTA_DST | RTA_GATEWAY | RTA_NETMASK);
     rt_msg->rtm_flags =  RTF_UP | RTF_GATEWAY | RTF_STATIC;
@@ -705,19 +709,19 @@ void set_default_route(struct in_addr *gateway) {
     rt_msg->rtm_msglen = i;
 
     if (write(routes, buf, i) == i) {
-        syslog(LOG_NOTICE, "default route added");
-    } else if (errno == EEXIST) {
-        rt_msg->rtm_type = RTM_CHANGE;
+        syslog(LOG_NOTICE, "default route changed");
+    } else if (errno == ESRCH) {
+        rt_msg->rtm_type = RTM_ADD;
         if (write(routes, buf, i) == i) {
-            syslog(LOG_NOTICE, "default route changed");
+            syslog(LOG_NOTICE, "default route added");
         } else {
-            syslog(LOG_ERR, "couldn't change default route: %m");
+            syslog(LOG_ERR, "couldn't add default route: %m");
             exit(1);
         }
     } else {
         char ip[INET_ADDRSTRLEN];
         inet_ntoa_r(*gateway, ip, sizeof(ip));
-        syslog(LOG_ERR, "couldn't add default route %s: %m", ip);
+        syslog(LOG_ERR, "couldn't change default route %s: %m", ip);
         exit(1);
     }
 }
