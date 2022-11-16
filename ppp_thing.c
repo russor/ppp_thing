@@ -57,6 +57,7 @@ void discovery_process_state(int, int, u_char *, size_t, size_t);
 void ppp_process_state(int, u_char *, size_t, size_t);
 void ppp_tick();
 void new_state(int);
+void save_state();
 void load_config();
 void load_state();
 void send_session_to_peer();
@@ -64,9 +65,10 @@ void send_session_to_peer();
 uint8_t ppp_state;
 
 uint16_t ppp_session;
-#define TRIES 10
+#define TRIES 4
 uint8_t ppp_tries;
-time_t ppp_time;
+time_t ppp_time = 0;
+time_t disconnect_time;
 
 struct in_addr ppp_my_ip, ppp_peer_ip;
 u_char ppp_ether[ETHER_ADDR_LEN];
@@ -412,6 +414,7 @@ int main () {
                         bcopy(&buf[3 + ETHER_ADDR_LEN + sizeof(ppp_my_ip.s_addr)], &ppp_peer_ip.s_addr, sizeof(ppp_peer_ip.s_addr));
                         if (old_session != ppp_session) {
                             syslog(LOG_NOTICE, "got session %d from peer", ppp_session);
+                            save_state();
                         }
                     }
                 }    
@@ -501,7 +504,6 @@ void ppp_tick() {
             ppp_time = now;
         }
     } else if ((ppp_state == PPP_ZOMBIE && now > ppp_time) || (ppp_state == PPP_UP && now > ppp_time + 5)) {
-        // other side waits 50 seconds to close session
         if (ppp_tries == 0) {
             if (ppp_state == PPP_UP) {
                 new_state(PPP_ZOMBIE);
@@ -779,21 +781,6 @@ void new_state (int s) {
             break;
         case PPP_UP:
             assert(ppp_state == PPP_IPCP_ACK_RCVD || ppp_state == PPP_IPCP_ACK_SENT || ppp_state == PPP_ZOMBIE);
-            FILE * state_file = fopen ("/var/db/ppp_thing.state.tmp", "w");
-            char my_ip[INET_ADDRSTRLEN], peer_ip[INET_ADDRSTRLEN];
-            inet_ntoa_r(ppp_my_ip, my_ip, sizeof(my_ip));
-            inet_ntoa_r(ppp_peer_ip, peer_ip, sizeof(peer_ip));
-            
-            if (state_file != NULL) {
-                fprintf(state_file, "%x:%x:%x:%x:%x:%x\n%u\n%s\n%s\n",
-                    ppp_ether[0], ppp_ether[1], ppp_ether[2],
-                    ppp_ether[3], ppp_ether[4], ppp_ether[5],
-                    ppp_session, my_ip, peer_ip
-                );
-                if (fclose(state_file) == 0) {
-                    rename("/var/db/ppp_thing.state.tmp", "/var/db/ppp_thing.state");
-                }
-            }
             
             struct ifreq ifr;
 
@@ -820,6 +807,9 @@ void new_state (int s) {
                 exit(1);
             }
 
+            char my_ip[INET_ADDRSTRLEN], peer_ip[INET_ADDRSTRLEN];
+            inet_ntoa_r(ppp_my_ip, my_ip, sizeof(my_ip));
+            inet_ntoa_r(ppp_peer_ip, peer_ip, sizeof(peer_ip));
             syslog(LOG_NOTICE, "PPP UP! %s <-> %s mtu %d",
                 my_ip, peer_ip, MTU);
 
@@ -871,6 +861,8 @@ void new_state (int s) {
             set_default_route(&ppp_peer_ip);
             ppp_state = PPP_UP;
             ppp_tries = TRIES;
+            disconnect_time = 0;
+            save_state();
             break;
         case PPP_CLOSED: {
             struct ifreq ifr;
@@ -929,6 +921,10 @@ void new_state (int s) {
                 ppp_tries = TRIES;
             }
             ppp_state = PPP_CLOSED;
+            if (disconnect_time == 0) {
+                disconnect_time = time(NULL);
+            }
+            save_state();
             break; }
         case PPP_ZOMBIE:
             assert(ppp_state == PPP_DISCOVERY || ppp_state == PPP_UP);
@@ -943,6 +939,8 @@ void new_state (int s) {
             assert(ppp_state == PPP_CLOSED);
             ppp_tries = 0;
             ppp_time = 0;
+            disconnect_time = 0;
+            save_state();
             break;
     }
 }        
@@ -996,6 +994,26 @@ void discovery_process_state(int fd, int from_client, u_char * data, size_t len,
         NgSendData(fd, "pppoe", data, len);
     }
 }
+
+void save_state() {
+    FILE * state_file = fopen ("/var/db/ppp_thing.state.tmp", "w");
+    char my_ip[INET_ADDRSTRLEN], peer_ip[INET_ADDRSTRLEN];
+    inet_ntoa_r(ppp_my_ip, my_ip, sizeof(my_ip));
+    inet_ntoa_r(ppp_peer_ip, peer_ip, sizeof(peer_ip));
+
+    if (state_file != NULL) {
+        fprintf(state_file, "%x:%x:%x:%x:%x:%x\n%u\n%s\n%s\n\%d\n%d\n%lld\n",
+            ppp_ether[0], ppp_ether[1], ppp_ether[2],
+            ppp_ether[3], ppp_ether[4], ppp_ether[5],
+            ppp_session, my_ip, peer_ip,
+            ppp_state, I_AM_CARP_MASTER, (long long)disconnect_time
+        );
+        if (fclose(state_file) == 0) {
+            rename("/var/db/ppp_thing.state.tmp", "/var/db/ppp_thing.state");
+        }
+    }
+}
+
 
 void load_state() {
     FILE * state_file = fopen("/var/db/ppp_thing.state", "r");
