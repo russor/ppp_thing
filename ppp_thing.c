@@ -300,7 +300,7 @@ int main () {
                         new_state(PPP_STARTING);
                         probable_session = 0; // clear for future
                     } else {
-                        syslog(LOG_NOTICE, "Attempting to resume saved session");
+                        syslog(LOG_NOTICE, "Attempting to resume saved session %d", ppp_session);
                         new_state(PPP_ZOMBIE);
                     }
                     ppp_tick();
@@ -853,7 +853,7 @@ void new_state (int s) {
                 exit(1);
             }
             
-            syslog(LOG_INFO, "session %u, ether %x:%x:%x:%x:%x:%x", ppp_session,
+            syslog(LOG_INFO, "session %u, ether %02x:%02x:%02x:%02x:%02x:%02x", ppp_session,
                 ppp_ether[0], ppp_ether[1], ppp_ether[2],
                 ppp_ether[3], ppp_ether[4], ppp_ether[5]);
             
@@ -929,10 +929,6 @@ void new_state (int s) {
         case PPP_ZOMBIE:
             assert(ppp_state == PPP_DISCOVERY || ppp_state == PPP_UP);
             ppp_tries = TRIES;
-            if (ppp_state == PPP_DISCOVERY) {
-                // wait less if resuming a session
-                ppp_tries >>= 1; 
-            }
             ppp_state = PPP_ZOMBIE;
             break;
         case PPP_CARP_MASTER:
@@ -970,6 +966,18 @@ void discovery_process_state(int fd, int from_client, u_char * data, size_t len,
                 bcopy("resume", &data[len + 4], 6);
             }
             NgSendData(fd, "pppoe", data, len + 10);
+
+            // send gratituous ARP, to help with switch MAC discovery
+            // dest address -- broadcast
+            char my_ip[INET_ADDRSTRLEN];
+            inet_ntoa_r(ppp_my_ip, my_ip, sizeof(my_ip));
+
+            char buf[MAX_BUF]; // much too large
+            snprintf(buf, sizeof(buf), "/usr/local/sbin/arping -w 0 -i %s -s %02x:%02x:%02x:%02x:%02x:%02x -S %s %s",
+                ETHER_INTERFACE, ETHER_ADDR[0], ETHER_ADDR[1], ETHER_ADDR[2],
+                ETHER_ADDR[3], ETHER_ADDR[4], ETHER_ADDR[5], my_ip, my_ip);
+
+            system(buf);
         } else if (ppp_session && data[14] == 0x11 && data[15] == 0x19) { // Request
             data[15] = 0x65; // Session-confirmation
             data[16] = ppp_session >> 8;
@@ -1002,7 +1010,7 @@ void save_state() {
     inet_ntoa_r(ppp_peer_ip, peer_ip, sizeof(peer_ip));
 
     if (state_file != NULL) {
-        fprintf(state_file, "%x:%x:%x:%x:%x:%x\n%u\n%s\n%s\n\%d\n%d\n%lld\n",
+        fprintf(state_file, "%02x:%02x:%02x:%02x:%02x:%02x\n%u\n%s\n%s\n\%d\n%d\n%lld\n",
             ppp_ether[0], ppp_ether[1], ppp_ether[2],
             ppp_ether[3], ppp_ether[4], ppp_ether[5],
             ppp_session, my_ip, peer_ip,
@@ -1095,7 +1103,7 @@ void load_config() {
     inet_ntoa_r(CARP_ADDR, carp, sizeof(carp));
     inet_ntoa_r(CARP_ME, me, sizeof(me));
     inet_ntoa_r(CARP_PEER, peer, sizeof(peer));
-    syslog(LOG_INFO, "interface %s (%x:%x:%x:%x:%x:%x), user %s, pass %s, mtu %d, carp %s, me %s, peer %s",
+    syslog(LOG_INFO, "interface %s (%02x:%02x:%02x:%02x:%02x:%02x), user %s, pass %s, mtu %d, carp %s, me %s, peer %s",
         ETHER_INTERFACE, ETHER_ADDR[0], ETHER_ADDR[1], ETHER_ADDR[2],
         ETHER_ADDR[3], ETHER_ADDR[4], ETHER_ADDR[5], USER, PASS, MTU,
         carp, me, peer);
